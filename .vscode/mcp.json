@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "css-helper": {
+      "command": "node",
+      "args": [
+        "c:\\Users\\RichardHogan\\Development\\CSS-Helper MCP\\build\\index.js"
+      ],
+      "type": "stdio"
+    }
+  }
+}
