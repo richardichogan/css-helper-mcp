@@ -19,8 +19,11 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
+    "@types/pngjs": "^6.0.5",
     "chrome-remote-interface": "^0.33.3",
     "glob": "^10.3.10",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

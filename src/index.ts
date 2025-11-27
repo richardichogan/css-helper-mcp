@@ -8,6 +8,8 @@ import * as path from "path";
 import { glob } from "glob";
 import { getRelevantKnowledge } from "./cssKnowledge.js";
 import CDP from "chrome-remote-interface";
+import { PNG } from "pngjs";
+import pixelmatch from "pixelmatch";
 
 const server = new McpServer({
 	name: "css-helper",
@@ -32,6 +34,7 @@ interface InvestigationState {
 				properties: Array<{ name: string; value: string }>;
 			}>;
 			elementSelector: string;
+			screenshotPath?: string;
 		};
 		solution?: any;
 	};
@@ -842,6 +845,35 @@ Copy the output and paste it back to continue investigation.
 			// Get matched CSS rules
 			const { matchedCSSRules } = await CSS.getMatchedStylesForNode({ nodeId });
 
+			// Capture screenshot of the element
+			const { Page } = client;
+			await Page.enable();
+			
+			let screenshotPath: string | undefined;
+			try {
+				const { model } = await DOM.getBoxModel({ nodeId });
+				if (model && model.content) {
+					const [x1, y1, x2, y2, x3, y3, x4, y4] = model.content;
+					const x = Math.min(x1, x2, x3, x4);
+					const y = Math.min(y1, y2, y3, y4);
+					const width = Math.max(x1, x2, x3, x4) - x;
+					const height = Math.max(y1, y2, y3, y4) - y;
+					
+					const { data } = await Page.captureScreenshot({
+						format: 'png',
+						clip: { x, y, width, height, scale: 1 }
+					});
+					
+					// Save screenshot
+					const screenshotsDir = path.join(process.cwd(), '.css-helper-screenshots');
+					await fs.mkdir(screenshotsDir, { recursive: true });
+					screenshotPath = path.join(screenshotsDir, `${investigationId}-${Date.now()}.png`);
+					await fs.writeFile(screenshotPath, Buffer.from(data, 'base64'));
+				}
+			} catch (screenshotError) {
+				console.error('Screenshot capture failed:', screenshotError);
+			}
+
 			// Parse results
 			const computedStyles = computedStyle.reduce((acc, style) => {
 				acc[style.name] = style.value;
@@ -864,6 +896,7 @@ Copy the output and paste it back to continue investigation.
 				computedStyles,
 				matchedRules,
 				elementSelector,
+				screenshotPath,
 			};
 
 			const result = `
@@ -871,6 +904,7 @@ Copy the output and paste it back to continue investigation.
 
 **Element Inspected:** \`${elementSelector}\`
 **Browser:** Edge/Chrome (DevTools Protocol on port ${chromePort})
+${screenshotPath ? `\n📸 **Screenshot captured:** \`${screenshotPath}\`\n` : ''}
 
 ### 🌐 Computed Styles (What the Browser Actually Uses)
 ${Object.entries(computedStyles).slice(0, 20).map(([prop, value]) => `- **${prop}:** \`${value}\``).join('\n')}
@@ -883,7 +917,7 @@ ${i + 1}. **Selector:** \`${rule.selector}\` (Origin: ${rule.origin})
 ${rule.properties.map(p => `   - ${p.name}: ${p.value}`).join('\n')}
 `).join('\n')}
 
-**Next Step:** Use \`css_phase5_solution\` to generate the fix based on both static and live analysis.
+**Next Step:** Use \`css_compare_screenshots\` to compare with expected output, or proceed to \`css_phase5_solution\` to generate the fix.
 `;
 
 			return {
@@ -1010,6 +1044,21 @@ server.registerTool(
 			specificFix += '\n**Action:** Review these files to ensure styles are applied in the correct order.\n\n';
 		}
 
+		// Add visual diff analysis if available
+		let visualDiffSummary = '';
+		if (findings.solution?.visualDiff) {
+			const diff = findings.solution.visualDiff;
+			const diffPct = parseFloat(diff.diffPercentage);
+			
+			visualDiffSummary = `
+### 📸 Visual Comparison Analysis
+- **Difference:** ${diff.diffPercentage}% (${diff.diffPixels.toLocaleString()} pixels changed)
+- **Status:** ${diffPct < 1 ? '✅ Excellent match' : diffPct < 5 ? '⚠️ Minor differences' : '❌ Significant differences'}
+- **Diff Image:** \`${diff.diffImage}\`
+
+${diffPct >= 1 ? `**Visual differences suggest CSS is not rendering as expected.**\nReview the diff image to identify which elements are affected.\n` : ''}`;
+		}
+
 		const solution = `
 ## ✅ Phase 5: Solution Design Complete
 
@@ -1018,8 +1067,11 @@ server.registerTool(
 - **CSS Files Searched:** ${findings.cascade?.cssFilesSearched || 0}
 - **Conflicts Found:** ${findings.conflicts?.totalConflicts || 0}
 ${hasBrowserData ? `- **Live Browser Data:** ✅ Available` : `- **Live Browser Data:** ❌ Not used (optional)`}
+${findings.solution?.visualDiff ? `- **Visual Comparison:** ✅ Complete` : ''}
 
 ${browserInsights}
+
+${visualDiffSummary}
 
 ${specificFix || '### ✓ No Major Issues Detected\n\nThe CSS structure appears correct. The issue may be related to:\n- Timing (styles not loaded yet)\n- JavaScript overrides\n- Browser-specific behavior\n\n' + (hasBrowserData ? 'Check the browser data above for actual computed styles.' : 'Run `css_phase4b_browser` for live browser inspection.')}
 
@@ -1032,14 +1084,14 @@ ${knowledge}
 2. Apply the specific fixes listed above
 3. Test changes in browser DevTools first
 4. Verify the fix resolves the original issue: "${originalIssue}"
-5. Commit the CSS changes
+5. ${findings.solution?.visualDiff ? 'Run screenshot comparison again to verify fix' : 'Commit the CSS changes'}
 
 ### Why This Solution Works
 ${specificFix ? `This fix addresses the **specific conflicts** found in your code:
 - Eliminates duplicate property declarations
 - Removes unnecessary !important usage
 - Clarifies cascade order
-- Uses proper CSS specificity${hasBrowserData ? '\n- **Verified against live browser data** for accuracy' : ''}` : `The investigation didn't find obvious conflicts.${hasBrowserData ? ' Browser data shows no major mismatches.' : ''} The issue may require:
+- Uses proper CSS specificity${hasBrowserData ? '\n- **Verified against live browser data** for accuracy' : ''}${findings.solution?.visualDiff ? '\n- **Visual differences documented** for comparison' : ''}` : `The investigation didn't find obvious conflicts.${hasBrowserData ? ' Browser data shows no major mismatches.' : ''} The issue may require:
 - ${hasBrowserData ? 'Checking if styles are being overridden by JavaScript' : 'Running Phase 4b to inspect live browser computed styles'}
 - Verifying CSS is loaded correctly
 - Reviewing JavaScript interactions
@@ -1049,6 +1101,7 @@ ${specificFix ? `This fix addresses the **specific conflicts** found in your cod
 `;
 
 		investigation.findings.solution = {
+			...investigation.findings.solution,
 			generatedAt: new Date(),
 			recommendation: solution,
 			fixedFiles,
@@ -1060,7 +1113,117 @@ ${specificFix ? `This fix addresses the **specific conflicts** found in your cod
 	}
 );
 
-// Tool 7: Search CSS files
+// Tool 7: Compare Screenshots
+server.registerTool(
+	"css_compare_screenshots",
+	{
+		description: "Compare two screenshots and highlight visual differences. Returns diff percentage and generates a diff image showing changed pixels.",
+		inputSchema: {
+			expectedImage: z.string().describe("Path to expected/baseline screenshot"),
+			actualImage: z.string().describe("Path to actual screenshot (from Phase 4b or manual capture)"),
+			threshold: z.number().optional().describe("Pixel match threshold 0-1 (default: 0.1, lower = stricter)"),
+			investigationId: z.string().optional().describe("Investigation ID to attach results to"),
+		},
+	},
+	async ({ expectedImage, actualImage, threshold = 0.1, investigationId }) => {
+		try {
+			// Read both images
+			const [expectedBuffer, actualBuffer] = await Promise.all([
+				fs.readFile(expectedImage),
+				fs.readFile(actualImage),
+			]);
+
+			const expectedPng = PNG.sync.read(expectedBuffer);
+			const actualPng = PNG.sync.read(actualBuffer);
+
+			// Check dimensions match
+			if (expectedPng.width !== actualPng.width || expectedPng.height !== actualPng.height) {
+				return {
+					content: [{
+						type: "text",
+						text: `❌ Image dimensions don't match!\n- Expected: ${expectedPng.width}x${expectedPng.height}\n- Actual: ${actualPng.width}x${actualPng.height}\n\nResize images to the same dimensions before comparing.`,
+					}],
+				};
+			}
+
+			// Create diff image
+			const { width, height } = expectedPng;
+			const diffPng = new PNG({ width, height });
+
+			// Compare pixels
+			const numDiffPixels = pixelmatch(
+				expectedPng.data,
+				actualPng.data,
+				diffPng.data,
+				width,
+				height,
+				{ threshold }
+			);
+
+			const totalPixels = width * height;
+			const diffPercentage = ((numDiffPixels / totalPixels) * 100).toFixed(2);
+
+			// Save diff image
+			const diffPath = actualImage.replace(/\.png$/, '-diff.png');
+			await fs.writeFile(diffPath, PNG.sync.write(diffPng));
+
+			// Store results in investigation if provided
+			if (investigationId) {
+				const investigation = investigations.get(investigationId);
+				if (investigation) {
+					investigation.findings.solution = {
+						...investigation.findings.solution,
+						visualDiff: {
+							expectedImage,
+							actualImage,
+							diffImage: diffPath,
+							diffPixels: numDiffPixels,
+							diffPercentage,
+							totalPixels,
+						}
+					};
+				}
+			}
+
+			const status = parseFloat(diffPercentage) < 1 ? '✅' : parseFloat(diffPercentage) < 5 ? '⚠️' : '❌';
+
+			const result = `
+## ${status} Screenshot Comparison Complete
+
+### Comparison Results
+- **Expected:** \`${expectedImage}\`
+- **Actual:** \`${actualImage}\`
+- **Diff Image:** \`${diffPath}\`
+
+### Visual Differences
+- **Pixels Changed:** ${numDiffPixels.toLocaleString()} / ${totalPixels.toLocaleString()}
+- **Difference:** ${diffPercentage}%
+- **Threshold:** ${threshold} (${threshold === 0.1 ? 'default' : 'custom'})
+
+### Analysis
+${parseFloat(diffPercentage) < 1 ? 
+	'✅ **Excellent match!** Images are visually identical or nearly so.' : 
+	parseFloat(diffPercentage) < 5 ? 
+		'⚠️ **Minor differences detected.** May be acceptable depending on requirements.' : 
+		'❌ **Significant visual differences found.** Review the diff image to identify CSS issues.'}
+
+### Next Steps
+1. Open the diff image at \`${diffPath}\` to see highlighted changes (pink = different pixels)
+2. ${investigationId ? 'Use `css_phase5_solution` to generate a fix based on all findings' : 'Run Phase 4b to capture browser styles and investigate CSS rules'}
+`;
+
+			return {
+				content: [{ type: "text", text: result }],
+			};
+		} catch (error: any) {
+			return {
+				content: [{ type: "text", text: `❌ Image comparison failed: ${error.message}\n\nMake sure both image paths are correct and the files are valid PNG images.` }],
+			};
+		}
+	}
+);
+
+// Tool 8: Search CSS files
 server.registerTool(
 	"css_search_files",
 	{
