@@ -18,6 +18,105 @@ export interface FrameworkDefaults {
  * Common CSS issues and their solutions
  */
 export const CSS_COMMON_ISSUES: Record<string, CSSIssue> = {
+	muiVisibleBox: {
+		problem: "Unexpected visible white/grey box in Material-UI dark theme",
+		commonCauses: [
+			"Using bgcolor with light colors (grey.50, grey.100, 'white') inside dark containers",
+			"DialogContent or Paper with light bgcolor creating contrast issues",
+			"Box component with bgcolor that doesn't match parent theme",
+			"Inherited bgcolor from parent conflicting with nested bgcolor values"
+		],
+		solution: `
+**Problem:** Light bgcolor values create visible boxes in dark-themed dialogs
+
+**Check For:**
+1. Box/Paper with \`bgcolor="grey.100"\` or \`bgcolor="grey.50"\` in dark containers
+2. DialogContent with explicit bgcolor that conflicts with theme
+3. Nested Box components with mismatched bgcolor values
+
+**Fix:**
+// ❌ Bad - creates visible light box in dark theme
+<Box bgcolor="grey.100" p={2}>Content</Box>
+
+// ✅ Good - use theme-aware background or transparent
+<Box bgcolor="background.paper" p={2}>Content</Box>
+<Box bgcolor="transparent" p={2}>Content</Box>
+<Box sx={{ bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100' }}>Content</Box>
+
+**Color Contrast Check:** If bgcolor luminance is within 20% of parent background, it will be subtly visible.
+`,
+		example: `bgcolor="grey.100" in dark theme creates ~10% luminance difference = visible box`
+	},
+	
+	muiGridSpacing: {
+		problem: "Unexpected whitespace from Material-UI Grid spacing",
+		commonCauses: [
+			"Grid container spacing={X} creates negative margins PLUS padding on children",
+			"Spacing value is multiplied by 8px (theme.spacing default)",
+			"Negative margins on Grid container can cause overflow",
+			"Grid spacing adds visual space on BOTH sides of items"
+		],
+		solution: `
+**How Grid Spacing Works:**
+\`<Grid container spacing={2}>\` creates:
+- Container: margin: -16px (negative spacing)
+- Items: padding: 16px (positive spacing)
+- **Visual gap between items: 32px total** (16px + 16px)
+
+**Calculation:** spacing value × 8px = actual pixels
+- spacing={1} = 8px padding + 8px gap = 16px total visual space
+- spacing={2} = 16px padding + 16px gap = 32px total visual space
+- spacing={3} = 24px padding + 24px gap = 48px total visual space
+
+**Alternative (Recommended):**
+// Use flexbox with gap instead for cleaner control
+<Box display="flex" gap={2}> {/* gap uses theme.spacing, no negative margins */}
+  <Box>Item 1</Box>
+  <Box>Item 2</Box>
+</Box>
+
+**When Grid spacing is correct:** Wrapping behavior, responsive breakpoints
+**When to avoid:** Simple layouts where flexbox gap is clearer
+`,
+		example: `<Grid container spacing={2}> creates 32px visual gaps, not 16px`
+	},
+	
+	muiDialogContentPadding: {
+		problem: "Unexpected padding in DialogContent affecting layout",
+		commonCauses: [
+			"Material-UI DialogContent has default 24px padding (theme.spacing(3))",
+			"Padding is applied unless explicitly overridden with sx={{ p: 0 }}",
+			"Nested Box padding adds to DialogContent padding",
+			"Different padding values on DialogTitle vs DialogContent creating misalignment"
+		],
+		solution: `
+**Default Behavior:**
+<DialogContent> automatically has 24px padding on all sides
+
+**Check For:**
+1. Missing explicit padding override: \`sx={{ p: 0 }}\`
+2. Nested Box with additional padding creating double-padding effect
+3. DialogTitle padding (24px top/sides, 16px bottom) not matching DialogContent
+
+**Fix Options:**
+// Remove all default padding
+<DialogContent sx={{ p: 0 }}>
+  <Box p={2}>Your content with controlled padding</Box>
+</DialogContent>
+
+// Override specific sides
+<DialogContent sx={{ pt: 0, px: 3 }}> {/* Remove top, keep horizontal */}
+
+// Inherit padding but override children
+<DialogContent sx={{ p: 3 }}>
+  <Box sx={{ m: -3 }}>Full-width child</Box> {/* Negative margin to escape padding */}
+</DialogContent>
+
+**Tip:** Use browser DevTools computed styles to see inherited vs explicit padding
+`,
+		example: `DialogContent + Box p={3} = 24px + 24px = 48px total padding`
+	},
+	
 	centering: {
 		problem: "Element not centered horizontally or vertically",
 		commonCauses: [

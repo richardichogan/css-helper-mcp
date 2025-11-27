@@ -93,6 +93,83 @@ function formatSpecificity(score: SpecificityScore): string {
 	return `(${score.inline},${score.ids},${score.classes},${score.elements}) = ${score.total}`;
 }
 
+// Material-UI Component Analyzer
+interface MUIIssue {
+	type: 'bgcolor-mismatch' | 'grid-spacing' | 'dialog-padding' | 'color-contrast';
+	severity: 'critical' | 'warning' | 'info';
+	component: string;
+	message: string;
+	fix: string;
+}
+
+function analyzeMUIComponent(code: string, filePath: string): MUIIssue[] {
+	const issues: MUIIssue[] = [];
+	
+	// Check for light bgcolor in components (potential dark theme issues)
+	const bgcolorPattern = /bgcolor=["'](?:grey\.50|grey\.100|white|#f|#F)/g;
+	let match;
+	while ((match = bgcolorPattern.exec(code)) !== null) {
+		issues.push({
+			type: 'bgcolor-mismatch',
+			severity: 'critical',
+			component: filePath,
+			message: `Light bgcolor detected: ${match[0]} - This creates visible white/grey boxes in dark theme`,
+			fix: `Use theme-aware colors: bgcolor="background.paper" or bgcolor={(theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100'}`
+		});
+	}
+	
+	// Check for Grid spacing without explanation
+	const gridSpacingPattern = /<Grid[^>]*spacing=\{(\d+)\}/g;
+	while ((match = gridSpacingPattern.exec(code)) !== null) {
+		const spacing = parseInt(match[1]);
+		const visualSpace = spacing * 8 * 2; // spacing × 8px × 2 sides
+		issues.push({
+			type: 'grid-spacing',
+			severity: 'warning',
+			component: filePath,
+			message: `Grid spacing={${spacing}} creates ${visualSpace}px total visual gaps (${spacing * 8}px padding each side)`,
+			fix: `Consider flexbox with gap: <Box display="flex" gap={${spacing}}> for cleaner spacing (no negative margins)`
+		});
+	}
+	
+	// Check for DialogContent without padding override
+	const dialogContentPattern = /<DialogContent(?![^>]*sx=\{\{[^}]*p:|[^}]*padding:)/;
+	if (dialogContentPattern.test(code)) {
+		issues.push({
+			type: 'dialog-padding',
+			severity: 'warning',
+			component: filePath,
+			message: `DialogContent without explicit padding override - Material-UI applies default 24px padding`,
+			fix: `Add sx={{ p: 0 }} to DialogContent and control padding manually with nested Box`
+		});
+	}
+	
+	return issues;
+}
+
+// Color Contrast Analyzer (simple luminance check)
+function checkColorContrast(color1: string, color2: string): { issue: boolean; difference: number } {
+	// Simplified luminance calculation for common MUI colors
+	const luminanceMap: Record<string, number> = {
+		'grey.50': 0.97,
+		'grey.100': 0.93,
+		'grey.200': 0.86,
+		'grey.300': 0.74,
+		'grey.900': 0.13,
+		'white': 1.0,
+		'black': 0.0,
+		'background.paper': 0.12, // dark theme default
+		'background.default': 0.08, // dark theme default
+	};
+	
+	const lum1 = luminanceMap[color1] ?? 0.5;
+	const lum2 = luminanceMap[color2] ?? 0.5;
+	const diff = Math.abs(lum1 - lum2);
+	
+	// Flag if difference is < 20% (0.2)
+	return { issue: diff < 0.2, difference: diff };
+}
+
 // Tool 1: Initialize CSS investigation
 server.registerTool(
 	"css_investigate_start",
@@ -202,18 +279,51 @@ server.registerTool(
 					return { path: file, content: content.slice(0, 2000) }; // First 2000 chars
 				})
 			);
+			
+			// Analyze Material-UI components for common issues
+			const muiIssues: MUIIssue[] = [];
+			for (const file of fileContents) {
+				const issues = analyzeMUIComponent(file.content, path.basename(file.path));
+				muiIssues.push(...issues);
+			}
 
 			investigation.findings.structure = {
 				filesFound: files.length,
 				filesAnalyzed: fileContents.length,
 				files: fileContents,
+				muiIssues,
 			};
+			
+			const criticalIssues = muiIssues.filter(i => i.severity === 'critical');
+			const warningIssues = muiIssues.filter(i => i.severity === 'warning');
 
 			const result = `
 ## ✅ Phase 1: Structure Analysis Complete
 
 **Files Found:** ${files.length}
 **Files Analyzed:** ${fileContents.length}
+
+${muiIssues.length > 0 ? `
+### 🚨 Material-UI Issues Detected
+
+${criticalIssues.length > 0 ? `
+**CRITICAL Issues (${criticalIssues.length}):**
+${criticalIssues.map(issue => `
+- **${issue.component}**
+  - Problem: ${issue.message}
+  - Fix: ${issue.fix}
+`).join('\n')}
+` : ''}
+
+${warningIssues.length > 0 ? `
+**Warnings (${warningIssues.length}):**
+${warningIssues.map(issue => `
+- **${issue.component}**
+  - Problem: ${issue.message}
+  - Fix: ${issue.fix}
+`).join('\n')}
+` : ''}
+` : '✓ No Material-UI issues detected'}
 
 ${fileContents.map((f, i) => `
 ### File ${i + 1}: ${path.basename(f.path)}
@@ -656,7 +766,51 @@ server.registerTool(
 					}
 				} else {
 					return {
-						content: [{ type: "text", text: `❌ Browser not running with debugging enabled.\n\n**Quick Fix:** Run this command:\n\`msedge.exe --remote-debugging-port=${chromePort}\`\n\nOr set \`autoLaunch: true\` to launch automatically.` }],
+						content: [{ type: "text", text: `❌ Browser not running with debugging enabled.\n\n**Quick Fix:** Run this command:\n\`msedge.exe --remote-debugging-port=${chromePort}\`\n\nOr set \`autoLaunch: true\` to launch automatically.\n\n**Alternative: Manual DevTools Script**\nIf you can't connect, copy this script into your browser's DevTools Console:\n\n\`\`\`javascript
+// CSS Helper DevTools Fallback Script
+const selector = '${elementSelector}';
+const element = document.querySelector(selector);
+if (!element) {
+  console.error('Element not found:', selector);
+} else {
+  const computed = window.getComputedStyle(element);
+  const largePaddingElements = [];
+  
+  // Get computed styles for target element
+  const styles = {
+    selector: selector,
+    padding: computed.padding,
+    margin: computed.margin,
+    backgroundColor: computed.backgroundColor,
+    display: computed.display,
+    gap: computed.gap,
+    gridGap: computed.gridGap
+  };
+  
+  // Find all elements with large padding/margin
+  document.querySelectorAll('*').forEach(el => {
+    const cs = window.getComputedStyle(el);
+    const padding = parseInt(cs.paddingTop) + parseInt(cs.paddingBottom);
+    const margin = parseInt(cs.marginTop) + parseInt(cs.marginBottom);
+    
+    if (padding > 16 || margin > 16) {
+      largePaddingElements.push({
+        tag: el.tagName,
+        class: el.className,
+        padding: cs.padding,
+        margin: cs.margin,
+        bgcolor: cs.backgroundColor
+      });
+    }
+  });
+  
+  console.log('Target Element Styles:', styles);
+  console.log('Elements with >16px padding/margin:', largePaddingElements);
+}
+\`\`\`
+
+Copy the output and paste it back to continue investigation.
+` }],
 					};
 				}
 			}
