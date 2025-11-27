@@ -47,20 +47,28 @@ A Model Context Protocol (MCP) server for CSS debugging with a comprehensive 5-p
    - Parameters: `expectedImage`, `actualImage`, `threshold` (default: 0.1), `investigationId` (optional)
    - Returns: Diff percentage, pixel count, and diff image path
 
-8. **css_phase5_solution** - Phase 5: Solution Design
+8. **css_analyze_screenshot** - Analyze Screenshot from Prompt for Visual Issues ✨ NEW
+   - **Paste a screenshot in your prompt** and analyze it for CSS problems
+   - Detects color contrast issues, invisible elements, bgcolor mismatches
+   - Analyzes pixel data to identify light-on-light or dark-on-dark problems
+   - Perfect for: "Here's a screenshot showing the issue - what's wrong?"
+   - Parameters: `screenshotPath`, `investigationId` (optional), `expectedColors` (optional)
+   - Returns: Color distribution, dominant colors, detected visual issues, specific fix recommendations
+
+9. **css_phase5_solution** - Phase 5: Solution Design
    - Generate fix with code and explanation based on static and/or live browser analysis
    - **Includes visual diff results** if screenshot comparison was performed
    - Parameters: `investigationId`, `originalIssue`
 
 ### Utility Tools
 
-9. **css_search_files** - Search for CSS/SCSS/LESS files
+10. **css_search_files** - Search for CSS/SCSS/LESS files
    - Parameters: `pattern` (glob), `workspacePath`
 
-10. **css_read_component** - Read component file contents
+11. **css_read_component** - Read component file contents
    - Parameters: `filePath`
 
-11. **css_get_knowledge** - Query CSS knowledge base
+12. **css_get_knowledge** - Query CSS knowledge base
    - Parameters: `query` (e.g., "centering", "flexbox", "z-index")
 
 ## Edge/Chrome DevTools Integration (Optional)
@@ -195,6 +203,46 @@ Use css_compare_screenshots with:
 - Diff image path showing exact differences
 - Status: ✅ (<1%), ⚠️ (1-5%), or ❌ (>5%)
 
+## Screenshot Analysis ✨ NEW
+
+The `css_analyze_screenshot` tool analyzes a single screenshot for visual CSS issues:
+
+**Use Case:** 
+"Here's a screenshot showing the problem - what's wrong with the CSS?"
+
+**Features:**
+- Analyzes pixel color distribution (white, black, grey percentages)
+- Identifies dominant colors in the screenshot
+- Detects visual issues:
+  - Light-on-light elements (bgcolor='grey.50' in light containers)
+  - Dark theme with unthemed light components
+  - Poor contrast or washed-out appearance
+  - Expected vs actual color scheme mismatches
+- Provides specific Material-UI fix recommendations
+
+**Example Usage:**
+```
+Attach a screenshot to your prompt, then:
+
+Use css_analyze_screenshot with:
+- screenshotPath: "path/to/screenshot.png"
+- expectedColors: { background: "dark", text: "white" }
+- investigationId: "investigation-123" (optional)
+```
+
+**Output:**
+- Color distribution percentages
+- Top 5 dominant colors
+- Detected visual issues with severity
+- Specific fix recommendations (e.g., "Replace bgcolor='grey.50' with bgcolor='background.paper'")
+- Material-UI code examples
+
+**Why This is Better:**
+- ✅ No browser DevTools connection needed
+- ✅ Works with any screenshot (design mockups, production, user-submitted)
+- ✅ Instant analysis without running the app
+- ✅ Perfect for: "I pasted a screenshot, tell me what's wrong"
+
 ## CSS Knowledge Base
 
 The server includes solutions for:
@@ -216,7 +264,7 @@ npx @modelcontextprotocol/inspector node "c:\Users\RichardHogan\Development\CSS-
 
 Look for:
 - Green "Running" indicator
-- All 11 tools listed (updated from 9)
+- All 12 tools listed (updated from 9)
 - Server name "css-helper" version "1.0.0"
 
 ### VS Code with ACRE Project

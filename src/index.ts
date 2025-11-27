@@ -109,7 +109,8 @@ function analyzeMUIComponent(code: string, filePath: string): MUIIssue[] {
 	const issues: MUIIssue[] = [];
 	
 	// Check for light bgcolor in components (potential dark theme issues)
-	const bgcolorPattern = /bgcolor=["'](?:grey\.50|grey\.100|white|#f|#F)/g;
+	// Matches both: bgcolor="grey.50" and bgcolor: 'grey.50' (JSX and sx prop)
+	const bgcolorPattern = /bgcolor[=:]\s*["'](?:grey\.50|grey\.100|white|#f(?:[0-9a-fA-F]{3,5})?)["']/g;
 	let match;
 	while ((match = bgcolorPattern.exec(code)) !== null) {
 		issues.push({
@@ -1223,7 +1224,165 @@ ${parseFloat(diffPercentage) < 1 ?
 	}
 );
 
-// Tool 8: Search CSS files
+// Tool 8: Analyze Screenshot for Visual CSS Issues
+server.registerTool(
+	"css_analyze_screenshot",
+	{
+		description: "Analyze a screenshot from the prompt for visual CSS issues. Detects color contrast problems, invisible elements, and layout issues by analyzing pixel data.",
+		inputSchema: {
+			screenshotPath: z.string().describe("Path to screenshot file (can be from user prompt attachment)"),
+			investigationId: z.string().optional().describe("Investigation ID to attach results to"),
+			expectedColors: z.object({
+				background: z.string().optional().describe("Expected background color (e.g., 'dark', 'light', '#1e1e1e')"),
+				text: z.string().optional().describe("Expected text color (e.g., 'white', 'black', '#ffffff')"),
+			}).optional().describe("Expected color scheme for contrast checking"),
+		},
+	},
+	async ({ screenshotPath, investigationId, expectedColors }) => {
+		try {
+			// Read screenshot
+			const imageBuffer = await fs.readFile(screenshotPath);
+			const png = PNG.sync.read(imageBuffer);
+			const { width, height, data } = png;
+
+			// Analyze pixel colors
+			const colorCounts = new Map<string, number>();
+			const totalPixels = width * height;
+			let whitePixels = 0;
+			let nearWhitePixels = 0;
+			let blackPixels = 0;
+			let nearBlackPixels = 0;
+			let greyPixels = 0;
+
+			// Sample pixels (analyze every 4th pixel for performance)
+			for (let i = 0; i < data.length; i += 16) { // RGBA = 4 bytes, skip 4 pixels
+				const r = data[i];
+				const g = data[i + 1];
+				const b = data[i + 2];
+				const a = data[i + 3];
+
+				if (a < 10) continue; // Skip transparent pixels
+
+				// Count whites, blacks, greys
+				if (r > 240 && g > 240 && b > 240) whitePixels++;
+				else if (r > 220 && g > 220 && b > 220) nearWhitePixels++;
+				else if (r < 15 && g < 15 && b < 15) blackPixels++;
+				else if (r < 35 && g < 35 && b < 35) nearBlackPixels++;
+				else if (Math.abs(r - g) < 20 && Math.abs(g - b) < 20) greyPixels++;
+
+				// Track dominant colors
+				const colorKey = `rgb(${Math.floor(r / 16) * 16},${Math.floor(g / 16) * 16},${Math.floor(b / 16) * 16})`;
+				colorCounts.set(colorKey, (colorCounts.get(colorKey) || 0) + 1);
+			}
+
+			const sampledPixels = whitePixels + nearWhitePixels + blackPixels + nearBlackPixels + greyPixels;
+			const whitePct = ((whitePixels + nearWhitePixels) / sampledPixels * 100).toFixed(1);
+			const blackPct = ((blackPixels + nearBlackPixels) / sampledPixels * 100).toFixed(1);
+			const greyPct = (greyPixels / sampledPixels * 100).toFixed(1);
+
+			// Get top 5 dominant colors
+			const dominantColors = Array.from(colorCounts.entries())
+				.sort((a, b) => b[1] - a[1])
+				.slice(0, 5);
+
+			// Detect issues
+			const issues: string[] = [];
+			
+			// Issue 1: High white/light content on potentially light background
+			if (parseFloat(whitePct) > 30) {
+				issues.push(`🚨 **High white/light content (${whitePct}%)** - May indicate invisible light-on-light elements (e.g., bgcolor='grey.50' in light containers)`);
+			}
+
+			// Issue 2: Very dark theme but light elements present
+			if (parseFloat(blackPct) > 40 && parseFloat(whitePct) > 15) {
+				issues.push(`⚠️ **Dark theme with light elements (${whitePct}% light, ${blackPct}% dark)** - Possible contrast issue or unthemed components`);
+			}
+
+			// Issue 3: Too much grey (potential contrast issues)
+			if (parseFloat(greyPct) > 50) {
+				issues.push(`⚠️ **High grey content (${greyPct}%)** - May indicate poor contrast or washed-out appearance`);
+			}
+
+			// Issue 4: Check expected colors if provided
+			if (expectedColors?.background === 'dark' && parseFloat(whitePct) > 25) {
+				issues.push(`🚨 **Expected dark background but ${whitePct}% light pixels detected** - Likely bgcolor mismatch (grey.50, grey.100, white)`);
+			}
+			if (expectedColors?.background === 'light' && parseFloat(blackPct) > 25) {
+				issues.push(`⚠️ **Expected light background but ${blackPct}% dark pixels detected** - Possible theming issue`);
+			}
+
+			// Store results in investigation if provided
+			if (investigationId) {
+				const investigation = investigations.get(investigationId);
+				if (investigation) {
+					investigation.findings.structure = {
+						...investigation.findings.structure,
+						screenshotAnalysis: {
+							screenshotPath,
+							whitePercentage: whitePct,
+							blackPercentage: blackPct,
+							greyPercentage: greyPct,
+							dominantColors: dominantColors.map(([color, count]) => `${color} (${((count / sampledPixels) * 100).toFixed(1)}%)`),
+							issues,
+						}
+					};
+				}
+			}
+
+			const result = `
+## 📸 Screenshot Analysis Complete
+
+### Image Details
+- **Path:** \`${screenshotPath}\`
+- **Dimensions:** ${width}×${height}px
+- **Pixels Analyzed:** ${sampledPixels.toLocaleString()} (sampled)
+
+### Color Distribution
+- **White/Light:** ${whitePct}%
+- **Black/Dark:** ${blackPct}%
+- **Grey:** ${greyPct}%
+
+### Dominant Colors
+${dominantColors.map(([color, count]) => `- ${color} - ${((count / sampledPixels) * 100).toFixed(1)}%`).join('\n')}
+
+### 🔍 Visual Issues Detected
+${issues.length > 0 ? issues.map(issue => `${issue}`).join('\n\n') : '✅ No obvious visual issues detected from pixel analysis.'}
+
+### 💡 Recommendations
+${issues.length > 0 ? `
+**Based on pixel analysis, this screenshot shows potential CSS issues:**
+
+1. **Check Material-UI bgcolor props** - Look for \`bgcolor='grey.50'\`, \`bgcolor='grey.100'\`, or \`bgcolor='white'\` in JSX
+2. **Use theme-aware colors** - Replace with \`bgcolor="background.paper"\` or conditional theme colors
+3. **Run Phase 1** - Use \`css_phase1_structure\` to scan component files for bgcolor mismatches
+
+**Example Fix:**
+\`\`\`jsx
+// Instead of:
+<Box sx={{ bgcolor: 'grey.50' }}>
+
+// Use:
+<Box sx={{ bgcolor: 'background.paper' }}>
+// or
+<Box sx={{ bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.100' }}>
+\`\`\`
+` : 'Continue with Phase 1 to analyze component structure.'}
+
+**Next Steps:** ${investigationId ? 'Run `css_phase1_structure` to find the exact code causing these visual issues.' : 'Start an investigation with `css_investigate_start` to systematically debug.'}
+`;
+
+			return {
+				content: [{ type: "text", text: result }],
+			};
+		} catch (error: any) {
+			return {
+				content: [{ type: "text", text: `❌ Screenshot analysis failed: ${error.message}\n\nMake sure the file path is correct and the file is a valid PNG image.` }],
+			};
+		}
+	}
+);
+
+// Tool 9: Search CSS files
 server.registerTool(
 	"css_search_files",
 	{
