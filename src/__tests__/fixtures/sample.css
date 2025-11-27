@@ -1,0 +1,64 @@
+/* Sample CSS file for testing cascade and specificity */
+
+/* Global reset */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Element selector */
+button {
+  padding: 8px 16px;
+  border: 1px solid #ccc;
+  background: white;
+  cursor: pointer;
+}
+
+/* Class selector */
+.btn-primary {
+  background: blue;
+  color: white;
+}
+
+/* ID selector */
+#submit-btn {
+  background: green;
+  font-weight: bold;
+}
+
+/* Combined selectors */
+.container .btn-primary {
+  margin: 10px;
+}
+
+/* Duplicate property (conflict) */
+.btn-primary {
+  background: darkblue; /* This overrides the earlier blue */
+}
+
+/* !important usage */
+.btn-urgent {
+  background: red !important;
+  color: white !important;
+}
+
+/* Pseudo-classes */
+button:hover {
+  opacity: 0.8;
+}
+
+/* Attribute selectors */
+input[type="text"] {
+  border: 1px solid #ddd;
+  padding: 8px;
+}
+
+/* Specificity battle */
+.form .input-field {
+  border-color: blue;
+}
+
+#login-form input {
+  border-color: green; /* Higher specificity wins */
+}
