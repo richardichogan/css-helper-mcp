@@ -744,12 +744,14 @@ server.registerTool(
 					// Auto-launch Edge with debugging (Windows-specific)
 					const { spawn } = await import('child_process');
 					const edgePath = 'msedge.exe'; // Windows PATH should find it
-					const args = ['--remote-debugging-port=' + chromePort];
+					const args = [
+						'--remote-debugging-port=' + chromePort,
+						'--user-data-dir=' + process.env.TEMP + '\\edge-debug-' + chromePort, // Separate profile to avoid conflicts
+						'about:blank' // Start with blank page
+					];
 					
 					if (headless) {
 						args.push('--headless=new'); // Chromium headless mode - no visible window
-					} else {
-						args.push('--new-window');
 					}
 					
 					spawn(edgePath, args, { 
@@ -757,15 +759,27 @@ server.registerTool(
 						stdio: 'ignore' 
 					}).unref();
 					
-					// Wait for browser to start
-					await new Promise(resolve => setTimeout(resolve, 3000));
+					// Retry connection with exponential backoff
+					let connected = false;
+					for (let attempt = 1; attempt <= 5; attempt++) {
+						await new Promise(resolve => setTimeout(resolve, attempt * 1000)); // 1s, 2s, 3s, 4s, 5s
+						
+						try {
+							client = await CDP({ port: chromePort });
+							connected = true;
+							break;
+						} catch (retryError) {
+							if (attempt === 5) {
+								return {
+									content: [{ type: "text", text: `❌ Failed to auto-launch Edge after 5 attempts (waited ${1+2+3+4+5}s).\n\n**The browser may already be running or port ${chromePort} is in use.**\n\n**Try these alternatives:**\n\n1. **Manual browser launch:**\n   \`\`\`powershell\n   msedge.exe --remote-debugging-port=${chromePort}\n   \`\`\`\n   Then navigate to your page and retry.\n\n2. **Use screenshot analysis instead (no browser needed):**\n   Paste a screenshot and use \`css_analyze_screenshot\` to detect visual CSS issues.\n\n3. **Check if port is in use:**\n   \`\`\`powershell\n   netstat -ano | findstr :${chromePort}\n   \`\`\`\n   If something is using it, try a different port or kill that process.\n\n**Original error:** ${connectError.message}` }],
+								};
+							}
+						}
+					}
 					
-					// Retry connection
-					try {
-						client = await CDP({ port: chromePort });
-					} catch (retryError: any) {
+					if (!connected) {
 						return {
-							content: [{ type: "text", text: `❌ Failed to auto-launch Edge: ${retryError.message}\n\n**Manual Setup:**\n\`msedge.exe --remote-debugging-port=${chromePort}\`` }],
+							content: [{ type: "text", text: `❌ Could not establish connection to Edge.\n\n**Please use manual launch or screenshot analysis instead.**` }],
 						};
 					}
 				} else {
@@ -817,6 +831,13 @@ Copy the output and paste it back to continue investigation.
 ` }],
 					};
 				}
+			}
+			
+			// Type guard: ensure client is defined
+			if (!client) {
+				return {
+					content: [{ type: "text", text: `❌ Failed to establish browser connection.` }],
+				};
 			}
 			
 			const { DOM, CSS, Runtime } = client;
