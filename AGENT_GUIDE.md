@@ -293,6 +293,95 @@ Progress: [Phase 1 ✅] → [Phase 2 ✅] → [Phase 3 🔄] → [Phase 4 ⏸️
 - `css_search_knowledge` - Search CSS knowledge base
 - `css_read_component` - Read component file contents
 - `css_get_knowledge` - Get all CSS patterns
+- `css_batch_apply` - Find similar components and propose batch styling changes ✨ NEW
+
+---
+
+## 🔄 Batch Application Protocol
+
+### When to Use css_batch_apply
+
+**ALWAYS use before applying style changes to ensure consistency:**
+
+```
+User: "Add padding to ProfileCard"
+Agent: [STOP - Check for similar components first]
+Agent: Run css_batch_apply to find related components
+Agent: Show user all similar components found
+Agent: Ask: "Apply to all or just target?"
+```
+
+### How Batch Application Works
+
+1. **Detect Similar Components**
+   - Searches workspace for components with similar structure
+   - Calculates similarity scores (0-100%)
+   - Identifies shared patterns (Grid, Card, MUI usage)
+
+2. **Show Scope Analysis**
+   ```markdown
+   Found 3 similar components:
+   - ProfileCard (target) - 100%
+   - DashboardCard - 85% similar
+   - StatCard - 82% similar
+   
+   All use CardContent in Grid layout.
+   ```
+
+3. **Get User Confirmation**
+   - Recommend batch application for consistency
+   - Let user choose: all, selective, or just target
+
+4. **Apply Consistently**
+   - Update all selected components
+   - Maintain consistency across codebase
+
+### Example Workflow
+
+**❌ OLD Way (Without Batch Check):**
+```
+User: "Add padding to ProfileCard"
+Agent: [Adds padding to ProfileCard]
+User: "Do the same for DashboardCard"
+Agent: [Adds padding to DashboardCard]
+User: "And StatCard..."
+```
+**Result:** 3 requests for same change 😞
+
+**✅ NEW Way (With Batch Check):**
+```
+User: "Add padding to ProfileCard"
+Agent: [Runs css_batch_apply first]
+Agent: "Found 3 similar Card components. Apply to all?"
+User: "Yes"
+Agent: [Applies to all 3 at once]
+```
+**Result:** 1 request, complete solution! 🎯
+
+### Integration with Phase 1
+
+Phase 1 now **automatically detects** similar components:
+
+```markdown
+## Phase 1 Output (Enhanced)
+
+### 🔗 Similar Components Detected
+- ProfileCard ↔️ DashboardCard (85% similar)
+- ProfileCard ↔️ StatCard (82% similar)
+
+⚠️ Consistency Recommendation: When applying style changes, 
+consider applying to all similar components.
+
+💡 Tip: Use `css_batch_apply` to update all at once.
+```
+
+### When NOT to Batch Apply
+
+Only apply to single component if:
+- User explicitly says "only ProfileCard"
+- Component is unique (HomePage, UserProfile)
+- Components are in different contexts
+- Similarity score < 50%
 
 ---
 
@@ -301,10 +390,13 @@ Progress: [Phase 1 ✅] → [Phase 2 ✅] → [Phase 3 🔄] → [Phase 4 ⏸️
 Before ending investigation, verify:
 - [ ] Investigation ID obtained and used in all phases
 - [ ] Phase 1 completed (files analyzed)
+- [ ] **Similar components detected (check Phase 1 output)**
+- [ ] **If making style changes: used css_batch_apply to check scope**
 - [ ] Phase 2/3 completed OR skip reason documented
 - [ ] Phase 4 attempted (browser OR screenshot)
 - [ ] If Phase 4b failed, screenshot analysis attempted
 - [ ] Phase 5 solution generated
+- [ ] **If solution includes style changes: confirmed batch application**
 - [ ] User has code to fix the issue
 - [ ] Progress indicators showed throughout
 
@@ -319,6 +411,7 @@ Before ending investigation, verify:
 - File pattern unclear (which component?)
 - CSS selector needed for Phase 4b (which element?)
 - Screenshot not available for analysis
+- **Similar components found: "Apply to all or just target?"** ✨ NEW
 
 **Don't ask when:**
 - Which phase to run next (follow protocol)
@@ -327,4 +420,14 @@ Before ending investigation, verify:
 
 ---
 
-**Remember:** The protocol is designed to be followed sequentially with documented skip conditions. Trust the process! 🎯
+## 💡 Pro Tips for Batch Application
+
+1. **Phase 1 shows similarity automatically** - look for the "Similar Components Detected" section
+2. **Use css_batch_apply before making changes** - not after
+3. **Similarity > 70% = probably batch apply** - these components are very similar
+4. **Grid/Container children = always batch** - consistent styling in containers
+5. **Card/Button/Input variants = batch** - user expects consistency
+
+---
+
+**Remember:** The protocol is designed to be followed sequentially with documented skip conditions. **Always check for similar components before applying style changes!** Trust the process! 🎯

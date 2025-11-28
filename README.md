@@ -12,6 +12,8 @@ A Model Context Protocol (MCP) server for CSS debugging with a comprehensive 5-p
 - **CSS Knowledge Base**: Built-in solutions for common CSS issues (centering, z-index, flexbox, grid, overflow, etc.)
 - **Framework-Aware**: Understands defaults for Material-UI, Tailwind, Bootstrap, Ant Design, and more
 - **Material-UI Detection**: Automatically detects bgcolor mismatches (e.g., `grey.50` vs `grey[50]`), grid spacing issues, dialog padding
+- **Batch Style Application**: Finds similar components and recommends batch updates for consistency ✨ NEW
+- **Sibling Detection**: Phase 1 automatically detects similar components and shared parent containers ✨ NEW
 - **Browser Auto-Launch**: Automatically launches Edge with DevTools Protocol for live inspection
 - **Screenshot Analysis**: Fallback analysis when browser connection fails - no browser needed!
 - **File System Integration**: Search and read CSS/component files in your workspace
@@ -69,13 +71,21 @@ A Model Context Protocol (MCP) server for CSS debugging with a comprehensive 5-p
 
 ### Utility Tools
 
-10. **css_search_files** - Search for CSS/SCSS/LESS files
+10. **css_batch_apply** - Batch Style Application ✨ NEW
+   - **Find similar components before applying style changes**
+   - Detects siblings, variants, and components with similar structure
+   - Calculates similarity scores and recommends batch application
+   - **Use this BEFORE making style changes to ensure consistency**
+   - Parameters: `targetComponent`, `changeDescription`, `workspacePath`, `investigationId` (optional), `searchPattern` (optional)
+   - Returns: List of similar components, similarity scores, batch recommendation
+
+11. **css_search_files** - Search for CSS/SCSS/LESS files
    - Parameters: `pattern` (glob), `workspacePath`
 
-11. **css_read_component** - Read component file contents
+12. **css_read_component** - Read component file contents
    - Parameters: `filePath`
 
-12. **css_get_knowledge** - Query CSS knowledge base
+13. **css_get_knowledge** - Query CSS knowledge base
    - Parameters: `query` (e.g., "centering", "flexbox", "z-index")
 
 ## Edge/Chrome DevTools Integration (Optional)

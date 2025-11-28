@@ -313,11 +313,63 @@ server.registerTool(
 				muiIssues.push(...issues);
 			}
 
+			// Detect similar components and shared parents
+			const componentAnalysis = fileContents.map(file => {
+				const content = file.content;
+				const basename = path.basename(file.path, path.extname(file.path));
+				
+				return {
+					name: basename,
+					path: file.path,
+					hasCardContent: /CardContent|<Card/i.test(content),
+					hasGrid: /Grid|grid-template/i.test(content),
+					hasMUI: /@mui\/material/i.test(content),
+					hasSxProp: /sx={{/i.test(content),
+					hasFlexbox: /display:\s*['"]flex['"]|display:\s*"flex"/i.test(content),
+					parentContainer: content.match(/return\s*\(\s*<(\w+)/)?.[1] || 'Unknown',
+				};
+			});
+
+			// Group by similarity
+			const cardComponents = componentAnalysis.filter(c => c.hasCardContent);
+			const gridComponents = componentAnalysis.filter(c => c.hasGrid);
+			const muiComponents = componentAnalysis.filter(c => c.hasMUI);
+			
+			// Detect shared patterns
+			const sharedPatterns = {
+				allUseCards: cardComponents.length === fileContents.length,
+				allUseGrid: gridComponents.length === fileContents.length,
+				allUseMUI: muiComponents.length === fileContents.length,
+				commonParent: componentAnalysis[0]?.parentContainer,
+			};
+
+			// Calculate component similarity matrix
+			const similarities: Array<{comp1: string, comp2: string, score: number}> = [];
+			for (let i = 0; i < componentAnalysis.length; i++) {
+				for (let j = i + 1; j < componentAnalysis.length; j++) {
+					const c1 = componentAnalysis[i];
+					const c2 = componentAnalysis[j];
+					let score = 0;
+					if (c1.hasCardContent === c2.hasCardContent) score += 0.3;
+					if (c1.hasGrid === c2.hasGrid) score += 0.2;
+					if (c1.hasMUI === c2.hasMUI) score += 0.2;
+					if (c1.hasSxProp === c2.hasSxProp) score += 0.15;
+					if (c1.hasFlexbox === c2.hasFlexbox) score += 0.15;
+					
+					if (score > 0.5) {
+						similarities.push({ comp1: c1.name, comp2: c2.name, score });
+					}
+				}
+			}
+
 			investigation.findings.structure = {
 				filesFound: files.length,
 				filesAnalyzed: fileContents.length,
 				files: fileContents,
 				muiIssues,
+				componentAnalysis,
+				similarities,
+				sharedPatterns,
 			};
 			
 			const criticalIssues = muiIssues.filter(i => i.severity === 'critical');
@@ -328,6 +380,24 @@ server.registerTool(
 
 **Files Found:** ${files.length}
 **Files Analyzed:** ${fileContents.length}
+
+${similarities.length > 0 ? `
+### 🔗 Similar Components Detected
+
+${similarities.map(s => `
+- **${s.comp1}** ↔️ **${s.comp2}** (${(s.score * 100).toFixed(0)}% similar)
+`).join('\n')}
+
+${sharedPatterns.allUseCards || sharedPatterns.allUseGrid || sharedPatterns.allUseMUI ? `
+### 📦 Shared Patterns
+
+${sharedPatterns.allUseCards ? '- ✅ All components use Card/CardContent\n' : ''}${sharedPatterns.allUseGrid ? '- ✅ All components use Grid layout\n' : ''}${sharedPatterns.allUseMUI ? '- ✅ All components use Material-UI\n' : ''}
+` : ''}
+
+⚠️ **Consistency Recommendation:** When applying style changes, consider applying to all similar components for consistency.
+
+**💡 Tip:** Use \`css_batch_apply\` to find and update all similar components at once.
+` : ''}
 
 ${muiIssues.length > 0 ? `
 ### 🚨 Material-UI Issues Detected
@@ -1506,6 +1576,178 @@ server.registerTool(
 		description: "Query the CSS knowledge base for solutions to common issues.",
 		inputSchema: {
 			query: z.string().describe("CSS issue or keyword to search for (e.g., 'centering', 'flexbox', 'z-index')"),
+		},
+	},
+	async ({ query }) => {
+		const knowledge = getRelevantKnowledge(query);
+		return {
+			content: [{ type: "text", text: knowledge }],
+		};
+	}
+);
+
+// Tool 10: Batch Apply - Find similar components and apply changes consistently
+server.registerTool(
+	"css_batch_apply",
+	{
+		description: "Find all similar components in the workspace and propose batch styling changes. Use this BEFORE applying style changes to ensure consistency across related components. Detects siblings, variants, and components with similar structure.",
+		inputSchema: {
+			investigationId: z.string().optional().describe("Investigation ID (optional - can be used standalone)"),
+			targetComponent: z.string().describe("Target component name or path (e.g., 'ProfileCard' or 'src/components/ProfileCard.tsx')"),
+			changeDescription: z.string().describe("Description of the style change to apply (e.g., 'Add padding: 3 to CardContent')"),
+			searchPattern: z.string().optional().describe("Glob pattern to search for similar components (default: '**/*{ComponentName}*.tsx')"),
+			workspacePath: z.string().describe("Root workspace path"),
+		},
+	},
+	async ({ investigationId, targetComponent, changeDescription, searchPattern, workspacePath }) => {
+		try {
+			// Extract component name from path if needed
+			const componentName = path.basename(targetComponent, path.extname(targetComponent));
+			
+			// Determine search pattern - look for similar component names
+			const pattern = searchPattern || `**/*${componentName.replace(/Card|Button|Input/, '{Card,Button,Input}')}*.{tsx,jsx}`;
+			
+			// Search for similar components
+			const files = await glob(pattern, { cwd: workspacePath, absolute: true });
+			
+			if (files.length === 0) {
+				return {
+					content: [{ type: "text", text: `⚠️ No similar components found for pattern: ${pattern}` }],
+				};
+			}
+
+			// Read and analyze each file
+			const components = await Promise.all(
+				files.map(async (file) => {
+					const content = await fs.readFile(file, 'utf-8');
+					const basename = path.basename(file);
+					
+					// Calculate similarity based on structure
+					const hasCardContent = /CardContent|<Card/i.test(content);
+					const hasGrid = /Grid|grid-template/i.test(content);
+					const hasSxProp = /sx={{/i.test(content);
+					const hasStyleProp = /style={{|styled\(/i.test(content);
+					const hasMUI = /@mui\/material|from ['"]@mui/i.test(content);
+					
+					// Similarity scoring
+					let similarity = 0;
+					if (hasCardContent) similarity += 0.3;
+					if (hasGrid) similarity += 0.2;
+					if (hasSxProp) similarity += 0.2;
+					if (hasStyleProp) similarity += 0.15;
+					if (hasMUI) similarity += 0.15;
+					
+					return {
+						path: file,
+						name: basename,
+						similarity: similarity,
+						structure: {
+							hasCardContent,
+							hasGrid,
+							hasMUI,
+							hasStyling: hasSxProp || hasStyleProp,
+						},
+						snippet: content.slice(0, 500),
+					};
+				})
+			);
+
+			// Sort by similarity
+			components.sort((a, b) => b.similarity - a.similarity);
+			
+			// Find shared parent containers
+			const sharedPatterns = {
+				grid: components.filter(c => c.structure.hasGrid).length,
+				card: components.filter(c => c.structure.hasCardContent).length,
+				mui: components.filter(c => c.structure.hasMUI).length,
+			};
+
+			const result = `
+## 🔍 Batch Scope Analysis
+
+**Target Component:** ${componentName}
+**Proposed Change:** ${changeDescription}
+
+---
+
+### Found ${components.length} Similar Components
+
+${components.map((comp, i) => `
+${i + 1}. **${comp.name}** (Similarity: ${(comp.similarity * 100).toFixed(0)}%)
+   - Path: \`${path.relative(workspacePath, comp.path)}\`
+   - Structure: ${comp.structure.hasCardContent ? '✅ CardContent' : ''}${comp.structure.hasGrid ? ' ✅ Grid' : ''}${comp.structure.hasMUI ? ' ✅ MUI' : ''}
+   ${i === 0 ? '   - **🎯 TARGET**' : ''}
+`).join('\n')}
+
+---
+
+### 📊 Shared Patterns
+
+- **Grid layout:** ${sharedPatterns.grid} components
+- **Card structure:** ${sharedPatterns.card} components  
+- **Material-UI:** ${sharedPatterns.mui} components
+
+---
+
+### 💡 Recommendation
+
+${components.length > 1 ? `
+**Apply change to all ${components.length} components for consistency.**
+
+These components share similar structure and likely need the same styling adjustments.
+` : `
+Only one component found. No batch application needed.
+`}
+
+---
+
+## ⚡ NEXT STEPS
+
+**Option 1: Apply to all (recommended)**
+\`\`\`
+Apply "${changeDescription}" to all ${components.length} components
+\`\`\`
+
+**Option 2: Apply selectively**
+Review each component and decide individually.
+
+**Option 3: Just target**
+Only apply to ${componentName}.
+
+**Which option do you prefer?**
+`;
+
+			// Update investigation if provided
+			if (investigationId && investigations.has(investigationId)) {
+				const investigation = investigations.get(investigationId)!;
+				investigation.findings.structure = {
+					...investigation.findings.structure,
+					batchScope: {
+						targetComponent: componentName,
+						similarComponents: components,
+						recommendation: components.length > 1 ? 'batch' : 'single',
+					},
+				};
+			}
+
+			return {
+				content: [{ type: "text", text: result }],
+			};
+		} catch (error) {
+			return {
+				content: [{ type: "text", text: `❌ Error analyzing batch scope: ${error}` }],
+			};
+		}
+	}
+);
+
+// Tool 11: Get CSS knowledge (moved after batch apply)
+server.registerTool(
+	"css_get_knowledge_legacy",
+	{
+		description: "Legacy knowledge tool - use css_get_knowledge instead",
+		inputSchema: {
+			query: z.string(),
 		},
 	},
 	async ({ query }) => {
