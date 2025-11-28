@@ -2,13 +2,20 @@
 
 A Model Context Protocol (MCP) server for CSS debugging with a comprehensive 5-phase investigation protocol.
 
+## 📋 For AI Agents
+
+**See [AGENT_GUIDE.md](./AGENT_GUIDE.md)** for complete protocol documentation, error handling, and step-by-step guidance.
+
 ## Features
 
-- **5-Phase Investigation Protocol**: Systematic approach to CSS debugging
+- **5-Phase Investigation Protocol**: Systematic approach to CSS debugging with mandatory steps and error recovery
 - **CSS Knowledge Base**: Built-in solutions for common CSS issues (centering, z-index, flexbox, grid, overflow, etc.)
 - **Framework-Aware**: Understands defaults for Material-UI, Tailwind, Bootstrap, Ant Design, and more
+- **Material-UI Detection**: Automatically detects bgcolor mismatches (e.g., `grey.50` vs `grey[50]`), grid spacing issues, dialog padding
+- **Browser Auto-Launch**: Automatically launches Edge with DevTools Protocol for live inspection
+- **Screenshot Analysis**: Fallback analysis when browser connection fails - no browser needed!
 - **File System Integration**: Search and read CSS/component files in your workspace
-- **Stateful Investigations**: Track findings across multiple phases
+- **Stateful Investigations**: Track findings and progress across multiple phases
 
 ## Available Tools
 

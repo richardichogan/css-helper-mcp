@@ -21,6 +21,8 @@ interface InvestigationState {
 	id: string;
 	startedAt: Date;
 	currentPhase: number;
+	completedPhases: number[]; // Track which phases are complete
+	phaseErrors: Map<number, string>; // Track errors per phase
 	findings: {
 		structure?: any;
 		cascade?: any;
@@ -178,7 +180,7 @@ function checkColorContrast(color1: string, color2: string): { issue: boolean; d
 server.registerTool(
 	"css_investigate_start",
 	{
-		description: "Start a new CSS investigation with 5-phase protocol. Returns investigation ID, protocol overview, and relevant CSS knowledge.",
+		description: "Start a new CSS investigation with 5-phase protocol. ALWAYS START HERE - this is the entry point for all CSS investigations. Returns investigation ID (save this!), protocol overview, and relevant CSS knowledge. See AGENT_GUIDE.md for complete protocol and error handling.",
 		inputSchema: {
 			issue: z.string().describe("Description of the CSS issue to investigate"),
 			workspacePath: z.string().optional().describe("Root path of the workspace (optional - will auto-detect if not provided)"),
@@ -190,6 +192,8 @@ server.registerTool(
 			id: investigationId,
 			startedAt: new Date(),
 			currentPhase: 1,
+			completedPhases: [],
+			phaseErrors: new Map(),
 			findings: {},
 		};
 		investigations.set(investigationId, investigation);
@@ -198,42 +202,60 @@ server.registerTool(
 		const protocol = `
 # 🔍 CSS Investigation Started
 **Investigation ID:** ${investigationId}
+**Status:** Phase 1 of 5 - Ready to begin
 
-## 5-Phase Investigation Protocol
+---
 
-### Phase 1: Structure Analysis
-- Search for component files related to the issue
-- Read component hierarchy and structure
-- Identify the DOM elements involved
-- Map parent-child relationships
+## 📋 5-Phase Investigation Protocol
 
-### Phase 2: Cascade Tracing
-- Search for all CSS files that might apply
-- Find all rules matching the element's selectors
-- Trace the cascade from global → local styles
-- Document each layer of styling
+✅ = Completed | 🔄 = Current | ⏸️ = Pending | ❌ = Error/Skipped
 
-### Phase 3: Conflict Detection
-- Analyze all found rules for conflicts
-- Identify duplicate properties with different values
-- Check for !important usage
-- Detect specificity battles
+**Phase 1: Component Structure Analysis** 🔄
+- Search for components matching the issue
+- Read component files and map hierarchy
+- Identify Material-UI usage and common issues
+- **Tool:** \`css_phase1_structure\`
+- **Required:** Yes (provides foundation for all other phases)
 
-### Phase 4: Multi-Level Cascade Analysis
-- Trace how styles combine across levels
-- Check for inheritance issues
-- Identify overridden properties
-- Map the complete cascade chain
+**Phase 2: CSS Cascade Tracing** ⏸️
+- Search CSS files for matching selectors
+- Trace rule application order
+- **Tool:** \`css_phase2_cascade\`
+- **Can skip if:** No custom CSS files (Material-UI only)
 
-### Phase 5: Solution Design
-- Generate fix based on findings
-- Reference CSS knowledge base for best practices
-- Provide before/after code examples
-- Explain why the solution works
+**Phase 3: Conflict Detection** ⏸️
+- Analyze rules for conflicts and !important usage
+- **Tool:** \`css_phase3_conflicts\`
+- **Can skip if:** Phase 2 found no CSS files
+
+**Phase 4: Browser Inspection** ⏸️
+- **Option A:** \`css_phase4b_browser\` - Live browser inspection (preferred)
+- **Option B:** \`css_analyze_screenshot\` - If browser fails, use screenshot analysis
+- **Can skip if:** Screenshot analysis used instead
+
+**Phase 5: Solution Design** ⏸️
+- Generate fix with before/after code
+- **Tool:** \`css_phase5_solution\`
+- **Required:** Yes (final deliverable)
+
+---
+
+## 🎯 Relevant CSS Knowledge
 
 ${knowledge}
 
-**Next Step:** Use \`css_phase1_structure\` to begin structure analysis.
+---
+
+## ⚡ MANDATORY NEXT STEP
+
+**YOU MUST NOW:** Run \`css_phase1_structure\` to analyze component structure.
+
+**Arguments needed:**
+- \`investigationId\`: "${investigationId}"
+- \`componentPattern\`: File pattern matching issue (e.g., "**/*Dashboard*.tsx")
+- \`workspacePath\`: Full path to workspace root
+
+**DO NOT skip Phase 1** - it provides critical context for all subsequent phases.
 `;
 
 		return {
@@ -251,7 +273,7 @@ ${knowledge}
 server.registerTool(
 	"css_phase1_structure",
 	{
-		description: "Phase 1: Analyze component structure. Search for components, read files, map hierarchy.",
+		description: "Phase 1: REQUIRED - Analyze component structure. Search for components, read files, detect Material-UI issues (bgcolor mismatches, grid spacing, etc.). This phase is mandatory and provides foundation for all subsequent phases. Returns next step instructions.",
 		inputSchema: {
 			investigationId: z.string().describe("Investigation ID from css_investigate_start"),
 			componentPattern: z.string().describe("Glob pattern to search for components (e.g., '**/*Button*.tsx')"),
@@ -717,7 +739,7 @@ ${analysis.overriddenProperties.length > 0 ? 'Multiple layers are competing for 
 server.registerTool(
 	"css_phase4b_browser",
 	{
-		description: "Phase 4b: Auto-connect to Edge/Chrome DevTools to inspect actual computed styles. Will attempt connection on port 9222, or try to detect running instances.",
+		description: "Phase 4b: PREFERRED browser inspection - Auto-launches Edge with DevTools Protocol, connects on port 9222, extracts computed styles, captures screenshot. IF THIS FAILS, use css_analyze_screenshot instead - DO NOT stop investigation! See AGENT_GUIDE.md for error recovery.",
 		inputSchema: {
 			investigationId: z.string().describe("Investigation ID"),
 			elementSelector: z.string().describe("CSS selector to inspect in the browser (e.g., '.button', '#header')"),
