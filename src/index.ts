@@ -743,7 +743,22 @@ server.registerTool(
 				if (autoLaunch) {
 					// Auto-launch Edge with debugging (Windows-specific)
 					const { spawn } = await import('child_process');
-					const edgePath = 'msedge.exe'; // Windows PATH should find it
+					const fs = await import('fs');
+					
+					// Find Edge executable - check common install locations
+					const possiblePaths = [
+						'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+						'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
+					];
+					
+					let edgePath = 'msedge.exe'; // Fallback to PATH
+					for (const path of possiblePaths) {
+						if (fs.existsSync(path)) {
+							edgePath = path;
+							break;
+						}
+					}
+					
 					const args = [
 						'--remote-debugging-port=' + chromePort,
 						'--user-data-dir=' + process.env.TEMP + '\\edge-debug-' + chromePort, // Separate profile to avoid conflicts
