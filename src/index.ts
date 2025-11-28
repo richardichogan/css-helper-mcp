@@ -928,10 +928,15 @@ ${rule.properties.map(p => `   - ${p.name}: ${p.value}`).join('\n')}
 			const errorMsg = error.message || String(error);
 			let helpText = '';
 			
+			// Common error scenarios
 			if (errorMsg.includes('ECONNREFUSED') || errorMsg.includes('connect')) {
-				helpText = `\n\n**Quick Fix:** Run Edge with debugging:\n\`msedge.exe --remote-debugging-port=${chromePort}\`\n\nOr set \`autoLaunch: true\` in the tool parameters.`;
+				helpText = `\n\n**Browser not running with debugging.** Run:\n\`msedge.exe --remote-debugging-port=${chromePort}\`\n\nOr set \`autoLaunch: true\` in the tool parameters.`;
 			} else if (errorMsg.includes('timeout')) {
-				helpText = '\n\nBrowser took too long to respond. Try refreshing the page.';
+				helpText = '\n\n**Browser not responding.** Try refreshing the page or restarting Edge with debugging enabled.';
+			} else if (errorMsg.includes('Canceled') || errorMsg.includes('cancelled')) {
+				helpText = `\n\n**Connection canceled or rejected.**\n\n**Troubleshooting:**\n1. Make sure Edge/Chrome is running with: \`msedge.exe --remote-debugging-port=${chromePort}\`\n2. Navigate to your page in that browser window\n3. Try setting \`autoLaunch: true\` to let the tool start Edge automatically\n4. Check if another process is using port ${chromePort}\n\n**Workaround:** Use \`css_analyze_screenshot\` instead - paste a screenshot and it will analyze visual issues without needing browser connection.`;
+			} else {
+				helpText = `\n\n**Unable to connect to browser.**\n\nTry:\n1. Manual browser launch: \`msedge.exe --remote-debugging-port=${chromePort}\`\n2. Set \`autoLaunch: true\` parameter\n3. Use \`css_analyze_screenshot\` as an alternative (no browser needed)`;
 			}
 			
 			return {
