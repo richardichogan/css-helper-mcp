@@ -1362,9 +1362,9 @@ ${parseFloat(diffPercentage) < 1 ?
 server.registerTool(
 	"css_analyze_screenshot",
 	{
-		description: "Analyze a screenshot for visual CSS issues. User must save screenshot to a file first. Detects color contrast problems, invisible elements, and layout issues by analyzing pixel data. IMPORTANT: screenshotPath must be a valid file path, not a conversational message.",
+		description: "Analyze a screenshot for visual CSS issues. **CRITICAL: User must save screenshot to a file and provide the file path.** This tool CANNOT access image attachments directly - it requires a saved file path like 'C:\\Users\\Name\\Desktop\\screenshot.png'. DO NOT pass image:0, image:1, or attachment references. Detects color contrast problems, invisible elements, and layout issues by analyzing pixel data.",
 		inputSchema: {
-			screenshotPath: z.string().describe("REQUIRED: Full file path to saved screenshot (e.g., 'C:\\Users\\Name\\Pictures\\screenshot.png'). If user hasn't saved screenshot, ask them to save it first and provide the path. DO NOT use conversational text as file path."),
+			screenshotPath: z.string().describe("REQUIRED: Full Windows file path to saved screenshot (e.g., 'C:\\Users\\RichardHogan\\Desktop\\screenshot.png'). NOT 'image:0' or attachment references. User must save screenshot to disk first. ASK USER: 'Please save the screenshot to a file and provide the full path.'"),
 			investigationId: z.string().optional().describe("Investigation ID to attach results to"),
 			expectedColors: z.object({
 				background: z.string().optional().describe("Expected background color (e.g., 'dark', 'light', '#1e1e1e')"),
@@ -1375,31 +1375,74 @@ server.registerTool(
 	async ({ screenshotPath, investigationId, expectedColors }) => {
 		try {
 			// Validate file path before attempting to read
+			// Check for invalid patterns: image references, URLs, conversational text
+			const invalidPatterns = [
+				/^image:\d+$/i,           // image:0, image:1, etc. (attachment references)
+				/^https?:\/\//i,          // URLs
+				/^data:image/i,           // Data URLs
+				/^blob:/i,                // Blob URLs
+				/\?/,                     // Question marks
+				/Can you/i,               // Conversational text
+				/please/i,                // Conversational text
+				/screenshot/i,            // Just the word "screenshot" without path
+			];
+			
+			const isInvalidPattern = invalidPatterns.some(pattern => pattern.test(screenshotPath));
+			const isTooLong = screenshotPath.length > 260;
+			const hasValidExtension = /\.(png|jpg|jpeg)$/i.test(screenshotPath);
+			const looksLikeWindowsPath = /^[A-Z]:\\/i.test(screenshotPath) || screenshotPath.startsWith('%');
+			
 			if (!screenshotPath || 
-			    screenshotPath.includes('?') || 
-			    screenshotPath.includes('Can you') ||
-			    screenshotPath.includes('please') ||
-			    screenshotPath.length > 260 ||
-			    !screenshotPath.match(/\.(png|jpg|jpeg)$/i)) {
+			    isInvalidPattern ||
+			    isTooLong ||
+			    !hasValidExtension ||
+			    (!looksLikeWindowsPath && !screenshotPath.startsWith('/'))) {
+				
+				let errorReason = 'Invalid file path format';
+				if (screenshotPath.match(/^image:\d+$/i)) {
+					errorReason = 'Image attachment reference (image:0, image:1, etc.) is not a file path';
+				} else if (screenshotPath.match(/^https?:\/\//i)) {
+					errorReason = 'URL provided instead of local file path';
+				} else if (!hasValidExtension) {
+					errorReason = 'Missing or invalid file extension (must be .png, .jpg, or .jpeg)';
+				} else if (!looksLikeWindowsPath && !screenshotPath.startsWith('/')) {
+					errorReason = 'Not a valid Windows file path (should start with C:\\ or similar)';
+				}
+				
 				return {
 					content: [{ 
 						type: "text", 
 						text: `❌ Invalid file path provided.
 
-**The screenshotPath must be a valid file path to a saved image.**
+**Error:** ${errorReason}
 
 **Current value:** "${screenshotPath}"
 
-**How to fix:**
-1. Ask user to save their screenshot to a file (e.g., "Please save the screenshot to your Desktop")
-2. Ask user for the full file path (e.g., "C:\\Users\\YourName\\Desktop\\screenshot.png")
-3. Call this tool again with the actual file path
+**IMPORTANT:** Screenshots in the chat are NOT automatically saved files!
 
-**Example valid paths:**
-- Windows: "C:\\Users\\Name\\Pictures\\screenshot.png"
-- Common: "%USERPROFILE%\\Desktop\\screenshot.png"
+**How to use this tool:**
 
-**DO NOT** use conversational text or questions as file paths.
+1. **User must save screenshot to disk first:**
+   - Right-click screenshot in chat → Save Image As...
+   - Or use Windows Snipping Tool → Save
+   - Or PrtScn → Paste in Paint → Save
+
+2. **Ask user for the saved file path:**
+   - "I see you have a screenshot. Please save it to a file first."
+   - "Once saved, provide the full file path (e.g., C:\\Users\\Name\\Desktop\\screenshot.png)"
+
+3. **Call this tool with actual file path:**
+   - Example: "C:\\Users\\RichardHogan\\Desktop\\dashboard-issue.png"
+   - Example: "C:\\Users\\RichardHogan\\Pictures\\screenshot.png"
+
+**Valid path examples:**
+- ✅ "C:\\Users\\RichardHogan\\Desktop\\screenshot.png"
+- ✅ "C:\\Users\\Name\\Pictures\\app-screenshot.jpg"
+- ❌ "image:0" (attachment reference - not a file)
+- ❌ "https://..." (URL - not a file)
+- ❌ "screenshot" (not a path)
+
+**Next step:** Ask user to save screenshot and provide the actual file path.
 ` 
 					}],
 				};
@@ -1417,12 +1460,13 @@ server.registerTool(
 **The file doesn't exist at this location.**
 
 **Troubleshooting:**
-1. Check if the path is correct
+1. Check if the path is correct (copy-paste from File Explorer address bar)
 2. Make sure the file was saved successfully
-3. Try using an absolute path (e.g., C:\\Users\\...)
+3. Use absolute path (e.g., C:\\Users\\...)
 4. Check for typos in the filename
+5. Verify file extension (.png, .jpg)
 
-**Ask the user:** "Can you verify the screenshot file path? Where did you save it?"
+**Ask the user:** "Can you verify the screenshot file path? Please right-click the file → Properties → Copy the full path."
 ` 
 					}],
 				};
