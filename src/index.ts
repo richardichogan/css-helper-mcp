@@ -10,6 +10,7 @@ import { getRelevantKnowledge } from "./cssKnowledge.js";
 import CDP from "chrome-remote-interface";
 import { PNG } from "pngjs";
 import pixelmatch from "pixelmatch";
+import { registerDebugHelperTools } from "./debugHelperTools.js";
 
 const server = new McpServer({
 	name: "css-helper",
@@ -1761,10 +1762,14 @@ server.registerTool(
 	}
 );
 
+
+// Register debug helper and style governance tools
+registerDebugHelperTools(server);
+
 async function main() {
 	const transport = new StdioServerTransport();
 	await server.connect(transport);
-	console.error("CSS Helper MCP Server running on stdio with 9 CSS debugging tools");
+	console.error("CSS Helper MCP Server running on stdio with 23 debugging & validation tools (14 CSS + 9 Debug/Style)");
 }
 
 main().catch((error) => {
