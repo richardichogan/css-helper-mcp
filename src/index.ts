@@ -1362,9 +1362,9 @@ ${parseFloat(diffPercentage) < 1 ?
 server.registerTool(
 	"css_analyze_screenshot",
 	{
-		description: "Analyze a screenshot from the prompt for visual CSS issues. Detects color contrast problems, invisible elements, and layout issues by analyzing pixel data.",
+		description: "Analyze a screenshot for visual CSS issues. User must save screenshot to a file first. Detects color contrast problems, invisible elements, and layout issues by analyzing pixel data. IMPORTANT: screenshotPath must be a valid file path, not a conversational message.",
 		inputSchema: {
-			screenshotPath: z.string().describe("Path to screenshot file (can be from user prompt attachment)"),
+			screenshotPath: z.string().describe("REQUIRED: Full file path to saved screenshot (e.g., 'C:\\Users\\Name\\Pictures\\screenshot.png'). If user hasn't saved screenshot, ask them to save it first and provide the path. DO NOT use conversational text as file path."),
 			investigationId: z.string().optional().describe("Investigation ID to attach results to"),
 			expectedColors: z.object({
 				background: z.string().optional().describe("Expected background color (e.g., 'dark', 'light', '#1e1e1e')"),
@@ -1374,6 +1374,60 @@ server.registerTool(
 	},
 	async ({ screenshotPath, investigationId, expectedColors }) => {
 		try {
+			// Validate file path before attempting to read
+			if (!screenshotPath || 
+			    screenshotPath.includes('?') || 
+			    screenshotPath.includes('Can you') ||
+			    screenshotPath.includes('please') ||
+			    screenshotPath.length > 260 ||
+			    !screenshotPath.match(/\.(png|jpg|jpeg)$/i)) {
+				return {
+					content: [{ 
+						type: "text", 
+						text: `❌ Invalid file path provided.
+
+**The screenshotPath must be a valid file path to a saved image.**
+
+**Current value:** "${screenshotPath}"
+
+**How to fix:**
+1. Ask user to save their screenshot to a file (e.g., "Please save the screenshot to your Desktop")
+2. Ask user for the full file path (e.g., "C:\\Users\\YourName\\Desktop\\screenshot.png")
+3. Call this tool again with the actual file path
+
+**Example valid paths:**
+- Windows: "C:\\Users\\Name\\Pictures\\screenshot.png"
+- Common: "%USERPROFILE%\\Desktop\\screenshot.png"
+
+**DO NOT** use conversational text or questions as file paths.
+` 
+					}],
+				};
+			}
+
+			// Check if file exists
+			try {
+				await fs.access(screenshotPath);
+			} catch (accessError) {
+				return {
+					content: [{ 
+						type: "text", 
+						text: `❌ File not found: ${screenshotPath}
+
+**The file doesn't exist at this location.**
+
+**Troubleshooting:**
+1. Check if the path is correct
+2. Make sure the file was saved successfully
+3. Try using an absolute path (e.g., C:\\Users\\...)
+4. Check for typos in the filename
+
+**Ask the user:** "Can you verify the screenshot file path? Where did you save it?"
+` 
+					}],
+				};
+			}
+
 			// Read screenshot
 			const imageBuffer = await fs.readFile(screenshotPath);
 			const png = PNG.sync.read(imageBuffer);

@@ -105,9 +105,26 @@ IF browser fails with "Canceled" or ECONNREFUSED:
 **Purpose:** Analyze visual issues from screenshot without browser
 
 **Arguments:**
-- `investigationId`
-- `screenshotPath` - path to screenshot file
-- `issue` - description of visual problem
+- `investigationId` (optional)
+- `screenshotPath` - **MUST be a valid file path to saved screenshot**
+- `expectedColors` (optional) - expected color scheme
+
+**CRITICAL: Screenshot must be saved to a file first!**
+
+**Correct workflow:**
+```
+User: "Here's a screenshot showing white background issue"
+Agent: "Please save that screenshot to a file (e.g., Desktop)"
+User: "Saved to C:\Users\Name\Desktop\screenshot.png"
+Agent: Call css_analyze_screenshot with path
+```
+
+**WRONG workflow:**
+```
+User: "Can you analyze this screenshot?"
+Agent: Call css_analyze_screenshot with "Can you analyze..."
+❌ ERROR: Invalid file path
+```
 
 **When to use:**
 - Browser connection fails repeatedly
